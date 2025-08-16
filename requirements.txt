@@ -1,0 +1,13 @@
+fastapi
+redis
+celery
+pytesseract
+sqlalchemy
+pydantic
+paddleocr
+dateparser
+datetime
+uvicorn
+requests
+asyncpg
+pdf2image
