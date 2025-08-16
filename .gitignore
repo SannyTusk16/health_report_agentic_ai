@@ -33,12 +33,15 @@ yarn-error.log*
 .env.production.local
 
 
+
 # =================================================================
-# Project-Specific Files (OCR_Agent)
+# Project-Specific Files (OCR_Agent and output)
 # =================================================================
 # Ignore generated output and user-uploaded files
 OCR_Agent/output/
 OCR_Agent/uploads/
+output/
+latex_reports/
 
 # If you want to ignore a specific file like the resume PDF
 # (although ignoring the parent 'uploads/' folder already does this)
