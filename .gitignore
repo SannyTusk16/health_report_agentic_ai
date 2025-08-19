@@ -41,6 +41,7 @@ yarn-error.log*
 OCR_Agent/output/
 OCR_Agent/uploads/
 output/
+input/
 latex_reports/
 
 # If you want to ignore a specific file like the resume PDF
