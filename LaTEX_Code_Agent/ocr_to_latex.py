@@ -2,18 +2,16 @@ import os
 import re
 from datetime import datetime
 from typing import Dict, List, Optional
-import openai
+# import google.generativeai as genai  # For Gemini API if needed
 from pathlib import Path
 
 class HealthCareLatexAgent:
     def __init__(self, api_key: str = None):
         """Initialize the healthcare LaTeX conversion agent."""
-        self.api_key = api_key or os.getenv('OPENAI_API_KEY')
-        if self.api_key:
-            openai.api_key = self.api_key
+        self.api_key = "aAIzaSyBaOTbQce2Yt2uKtJKOHfOek6o-t0PwSKg"
         
         self.latex_template = {
-            'header': r'''\documentclass[11pt,a4paper]{article}
+                'header': r'''\documentclass[11pt,a4paper]{article}
 \usepackage[utf8]{inputenc}
 \usepackage{geometry}
 \usepackage{fancyhdr}
@@ -23,6 +21,10 @@ class HealthCareLatexAgent:
 \usepackage{enumitem}
 \usepackage{url}
 \usepackage{hyperref}
+\usepackage{amssymb}
+% Checkbox macros
+\newcommand{\checkbox}{\(\Box\)}
+\newcommand{\checkedbox}{\(\boxtimes\)}
 
 \geometry{margin=1in}
 \pagestyle{fancy}
@@ -33,7 +35,6 @@ class HealthCareLatexAgent:
 \title{Healthcare Report}
 \author{Medical Facility}
 \date{\today}
-
 \begin{document}
 \maketitle
 ''',
@@ -41,12 +42,119 @@ class HealthCareLatexAgent:
         }
     
     def preprocess_text(self, text: str) -> str:
-        """Clean and preprocess the input text."""
-        # Remove extra whitespace and normalize line breaks
-        text = re.sub(r'\s+', ' ', text.strip())
-        text = re.sub(r'\n\s*\n', '\n\n', text)
+        # Normalize line endings and remove excessive blank lines
+        text = text.replace('\r\n', '\n').replace('\r', '\n')
+        text = re.sub(r'\n{3,}', '\n\n', text)
+        return text.strip()
+    
+    def identify_sections(self, text: str) -> Dict[str, Dict]:
+        """Identify sections based on 'SECTION X: ...' headers and return a dict with section titles and content."""
+        section_regex = re.compile(r'^(SECTION\s*\d+\s*:\s*.+)$', re.IGNORECASE | re.MULTILINE)
+        matches = list(section_regex.finditer(text))
+        sections = {}
+        if not matches:
+            # fallback: treat all as one section
+            return {"Report": {"title": "Report", "content": text.strip()}}
+        for i, match in enumerate(matches):
+            start = match.end()
+            end = matches[i+1].start() if i+1 < len(matches) else len(text)
+            title = match.group(1).strip()
+            content = text[start:end].strip()
+            sections[title] = {"title": title, "content": content}
+        return sections
+    
+    def format_section(self, title: str, content: str) -> str:
+        """Format a section with LaTeX section, using checkboxes for Yes/No and paragraphs for narrative."""
+        latex_title = re.sub(r'^SECTION\s*\d+\s*:\s*', '', title, flags=re.IGNORECASE).strip()
+        if not latex_title:
+            latex_title = title.strip()
         
-        # Escape LaTeX special characters
+        # Clean content and remove timeline data
+        content = re.sub(r'=== TIMELINE DATA ===.*', '', content, flags=re.DOTALL)
+        lines = [l.strip() for l in content.split('\n') if l.strip() and not l.startswith('[')]
+        
+        kv_pairs = []
+        narrative_lines = []
+        checkbox_questions = []
+        
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            
+            # Check for checkbox questions (Yes/No patterns)
+            if re.search(r'(OO?\s*Yes|M\s*No|VINo|MYes|OOINo|CJ\s*Not\s*Sure)', line):
+                # Clean up checkbox patterns
+                clean_line = re.sub(r'OO?\s*Yes', r'\\checkedbox~Yes', line)
+                clean_line = re.sub(r'MI?\s*No', r'\\checkbox~No', clean_line)
+                clean_line = re.sub(r'VINo', r'\\checkbox~No', clean_line)
+                clean_line = re.sub(r'MYes', r'\\checkedbox~Yes', clean_line)
+                clean_line = re.sub(r'OOINo', r'\\checkbox~No', clean_line)
+                clean_line = re.sub(r'O\s*Yes', r'\\checkedbox~Yes', clean_line)
+                clean_line = re.sub(r'M\s*No', r'\\checkbox~No', clean_line)
+                clean_line = re.sub(r'CJ\s*Not\s*Sure', r'\\checkbox~Not~Sure', clean_line)
+                checkbox_questions.append(clean_line)
+            
+            # Key-value pairs (simple format)
+            elif ':' in line and len(line.split(':')) == 2:
+                key, value = line.split(':', 1)
+                key = key.strip()
+                value = value.strip()
+                if len(key) < 100 and len(value) < 200:  # Reasonable length for key-value
+                    kv_pairs.append((key, value))
+                else:
+                    narrative_lines.append(line)
+            
+            # Everything else is narrative
+            else:
+                narrative_lines.append(line)
+            
+            i += 1
+        
+        # Build LaTeX output
+        latex = f'\\section{{{latex_title}}}\n\n'
+        
+        # Add key-value pairs as table
+        if kv_pairs:
+            latex += '\\begin{tabularx}{\\textwidth}{l X}\n\\toprule\n'
+            for k, v in kv_pairs:
+                latex += f'{self.escape_latex(k)} & {self.escape_latex(v)} \\\\\n'
+            latex += '\\bottomrule\n\\end{tabularx}\n\n'
+        
+        # Add narrative as proper paragraphs
+        if narrative_lines:
+            # Group consecutive lines into paragraphs
+            paragraphs = []
+            current_paragraph = []
+            
+            for line in narrative_lines:
+                if line.strip():
+                    current_paragraph.append(line)
+                else:
+                    if current_paragraph:
+                        paragraphs.append(' '.join(current_paragraph))
+                        current_paragraph = []
+            
+            if current_paragraph:
+                paragraphs.append(' '.join(current_paragraph))
+            
+            for paragraph in paragraphs:
+                latex += f'{self.escape_latex(paragraph)}\n\n'
+        
+        # Add checkbox questions as list
+        if checkbox_questions:
+            latex += '\\begin{itemize}[leftmargin=*]\n'
+            for question in checkbox_questions:
+                latex += f'\\item {self.escape_latex(question)}\n'
+            latex += '\\end{itemize}\n\n'
+        
+        return latex
+
+    def escape_latex(self, text: str) -> str:
+        """Escape LaTeX special characters in a string."""
+        # Don't double-escape already escaped checkbox commands
+        if '\\checkedbox' in text or '\\checkbox' in text:
+            return text
+            
         latex_chars = {
             '&': r'\&',
             '%': r'\%',
@@ -59,86 +167,9 @@ class HealthCareLatexAgent:
             '~': r'\~{}',
             '\\': r'\textbackslash{}'
         }
-        
         for char, replacement in latex_chars.items():
             text = text.replace(char, replacement)
-        
         return text
-    
-    def identify_sections(self, text: str) -> Dict[str, str]:
-        """Identify common healthcare report sections."""
-        sections = {}
-        
-        # Common healthcare report section patterns
-        section_patterns = {
-            'patient_info': r'(?i)(patient\s+information|demographics|personal\s+details)',
-            'chief_complaint': r'(?i)(chief\s+complaint|presenting\s+complaint|reason\s+for\s+visit)',
-            'history': r'(?i)(medical\s+history|patient\s+history|history\s+of\s+present\s+illness)',
-            'examination': r'(?i)(physical\s+examination|clinical\s+examination|examination\s+findings)',
-            'assessment': r'(?i)(assessment|diagnosis|clinical\s+impression)',
-            'plan': r'(?i)(treatment\s+plan|management\s+plan|recommendations)',
-            'medications': r'(?i)(medications|prescriptions|drug\s+therapy)',
-            'vitals': r'(?i)(vital\s+signs|vitals|blood\s+pressure)'
-        }
-        
-        # Split text and identify sections
-        lines = text.split('\n')
-        current_section = 'general'
-        current_content = []
-        
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-                
-            section_found = False
-            for section_key, pattern in section_patterns.items():
-                if re.search(pattern, line):
-                    if current_content:
-                        sections[current_section] = '\n'.join(current_content)
-                    current_section = section_key
-                    current_content = []
-                    section_found = True
-                    break
-            
-            if not section_found:
-                current_content.append(line)
-        
-        if current_content:
-            sections[current_section] = '\n'.join(current_content)
-        
-        return sections
-    
-    def format_patient_info(self, content: str) -> str:
-        """Format patient information section."""
-        return f'''\\section{{Patient Information}}
-\\begin{{itemize}}[leftmargin=*]
-{self._format_as_items(content)}
-\\end{{itemize}}
-'''
-    
-    def format_clinical_section(self, title: str, content: str) -> str:
-        """Format a clinical section."""
-        formatted_title = title.replace('_', ' ').title()
-        return f'''\\section{{{formatted_title}}}
-{content}
-
-'''
-    
-    def format_vitals_table(self, content: str) -> str:
-        """Format vital signs as a table."""
-        return f'''\\section{{Vital Signs}}
-\\begin{{center}}
-\\begin{{tabular}}{{ll}}
-\\toprule
-Parameter & Value \\\\
-\\midrule
-{self._extract_vitals(content)}
-\\bottomrule
-\\end{{tabular}}
-\\end{{center}}
-
-'''
     
     def _format_as_items(self, content: str) -> str:
         """Convert content to LaTeX itemize format."""
@@ -174,37 +205,22 @@ Parameter & Value \\\\
         # Read input file
         with open(text_file_path, 'r', encoding='utf-8') as file:
             raw_text = file.read()
-        
         # Preprocess text
         cleaned_text = self.preprocess_text(raw_text)
-        
         # Identify sections
         sections = self.identify_sections(cleaned_text)
-        
         # Build LaTeX document
         latex_content = [self.latex_template['header']]
-        
-        # Process each section
-        for section_key, content in sections.items():
-            if section_key == 'patient_info':
-                latex_content.append(self.format_patient_info(content))
-            elif section_key == 'vitals':
-                latex_content.append(self.format_vitals_table(content))
-            else:
-                latex_content.append(self.format_clinical_section(section_key, content))
-        
+        for section in sections.values():
+            latex_content.append(self.format_section(section['title'], section['content']))
         latex_content.append(self.latex_template['footer'])
-        
         # Combine all content
         final_latex = '\n'.join(latex_content)
-        
         # Save output
         if output_path is None:
             output_path = text_file_path.replace('.txt', '.tex')
-        
         with open(output_path, 'w', encoding='utf-8') as file:
             file.write(final_latex)
-        
         return final_latex
     
     def batch_convert(self, input_directory: str, output_directory: str = None):

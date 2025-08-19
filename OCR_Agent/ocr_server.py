@@ -8,6 +8,9 @@ import io
 import base64
 import uvicorn
 import requests
+import os
+from pathlib import Path
+from datetime import datetime
 
 app = FastAPI(title="OCR Agent API", description="PDF OCR processing service")
 
@@ -17,6 +20,31 @@ class TextInput(BaseModel):
 class TimelineResponse(BaseModel):
     extracted_text: str
     timeline_data: List[Dict[str, Any]]
+
+def save_ocr_text_to_file(text: str, source_info: str = "API Request") -> str:
+    """Save OCR text to ./output/text.txt, appending if file exists"""
+    try:
+        # Ensure output directory exists
+        output_dir = Path("./output")
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        output_file = output_dir / "text.txt"
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        # Prepare content with separator and metadata
+        separator = "\n" + "="*50 + "\n"
+        content = f"{separator}[{timestamp}] Source: {source_info}\n{separator}\n{text}\n"
+        
+        # Append to file (or create if doesn't exist)
+        with open(output_file, 'a', encoding='utf-8') as f:
+            f.write(content)
+        
+        print(f"✅ OCR text saved to: {output_file.absolute()}")
+        return str(output_file.absolute())
+        
+    except Exception as e:
+        print(f"❌ Error saving OCR text: {e}")
+        raise e
 
 def extract_text_from_pdf(pdf_bytes: bytes) -> str:
     """Extract text from PDF using OCR"""
@@ -74,6 +102,9 @@ async def create_timeline_from_text(request: TextInput):
         
         if not extracted_text:
             raise HTTPException(status_code=400, detail="No text could be extracted from PDF")
+        
+        # Save OCR text to ./output/text.txt
+        file_path = save_ocr_text_to_file(extracted_text, "PDF via API")
         
         # Process text into timeline format
         timeline_data = process_text_to_timeline(extracted_text)

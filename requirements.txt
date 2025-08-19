@@ -1,13 +1,42 @@
+# Medical Document Orchestration - Python Dependencies
+
+# Core Framework
 fastapi
-redis
-celery
+uvicorn
+
+# AI/ML Libraries
+google-generativeai
+paddleocr
+
+# OCR Engines
 pytesseract
+
+# PDF Processing
+pdf2image
+PyMuPDF
+
+# Image Processing
+Pillow
+opencv-python
+
+# Data Processing
+pandas
+numpy
 sqlalchemy
 pydantic
-paddleocr
+
+# Date/Time Processing
 dateparser
-datetime
-uvicorn
-requests
+
+# Async Processing
+aiofiles
 asyncpg
-pdf2image
+
+# Task Queue
+redis
+celery
+
+# Utilities
+requests
+python-multipart
+python-dotenv
